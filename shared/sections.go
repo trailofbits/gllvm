@@ -140,6 +140,6 @@ func PlatformizeSectionName(name string) string {
 	case osLINUX, osFREEBSD:
 		return "." + name
 	default:
-		return "<ERROR>"
+		return "." + name
 	}
 }
