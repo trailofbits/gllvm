@@ -99,7 +99,7 @@ func Compile(args []string, compiler string) (exitCode int) {
 			// When objects and bitcode are built we can attach bitcode paths
 			// to object files and link
 			for _, link := range bcObjLinks {
-				attachBitcodePathToObject(link.bcPath, link.objPath, compilerExecName, pr)
+				attachBitcodePathToObject(link.bcPath, link.objPath, compilerExecName, pr, args)
 			}
 			if !pr.IsCompileOnly {
 				compileTimeLinkFiles(compilerExecName, pr, newObjectFiles)
@@ -155,7 +155,7 @@ func jsonEncodeFlags(target string, compilerExecName string, args []string, pr p
 	return flagsBytes
 }
 
-func attachBitcodePathToObject(bcFile, objFile string, compilerExecName string, pr parserResult) (err error) {
+func attachBitcodePathToObject(bcFile, objFile string, compilerExecName string, pr parserResult, args []string) (err error) {
 	var absBcPath, _ = filepath.Abs(bcFile)
 	bitcodeData := []byte(absBcPath + "\n")
 
@@ -175,6 +175,14 @@ func attachBitcodePathToObject(bcFile, objFile string, compilerExecName string, 
 		err = out.Sync()
 		if err != nil {
 			return fmt.Errorf("Syncing bitcode archive %v failed because %v", destFilePath, err)
+		}
+	}
+
+	if LLVMEmbedFrontendArgs {
+		flagContents := jsonEncodeFlags(objFile, compilerExecName, args, pr)
+		err = SectionWrite(objFile, flagContents, SectionNameFlags)
+		if err != nil {
+			return fmt.Errorf("buildObjectFile(): Unable to write section")
 		}
 	}
 
@@ -209,15 +217,6 @@ func buildObjectFile(compilerExecName string, pr parserResult, srcFile string, o
 	if !success {
 		LogError("Failed to build object file for %s because: %v\n", srcFile, err)
 		return
-	}
-
-	if LLVMEmbedFrontendArgs {
-		flagContents := jsonEncodeFlags(objFile, compilerExecName, args, pr)
-		err = SectionWrite(objFile, flagContents, SectionNameFlags)
-		if err != nil {
-			LogError("buildObjectFile(): Unable to write section")
-			return false
-		}
 	}
 
 	success = true

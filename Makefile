@@ -6,6 +6,7 @@ develop:
 
 dumpsections: 
 	readelf -x .gllvm_flags data/hello
+	readelf -x .gllvm_flags data/hello2
 
 deps:
 	sudo apt install clang llvm
@@ -23,4 +24,4 @@ format:
 
 
 clean:
-	rm -f data/hello data/hello data/helloworld data/hello.bc [td]*/.helloworld.c.o [td]*/.helloworld.c.o.bc
+	rm -f data/hello data/hello2 [td]*/.*.o [td]*/.*.bc [td]*/*.o
