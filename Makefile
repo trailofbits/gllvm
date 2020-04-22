@@ -1,9 +1,10 @@
+
 develop:
 	go install github.com/SRI-CSL/gllvm/cmd/...
 
 
 
-dumpsections: check
+dumpsections: 
 	readelf -x .gllvm_flags data/hello
 
 deps:
@@ -11,15 +12,15 @@ deps:
 	touch $@
 
 check: develop deps
-	 go test -v ./tests
+	GLLVM_EMBED_FRONTEND_ARGS=true go test -v ./tests
 
 
 tests: develop deps
-	WLLVM_OUTPUT_LEVEL=DEBUG ; go test -v ./tests
+	WLLVM_OUTPUT_LEVEL=DEBUG GLLVM_EMBED_FRONTEND_ARGS=true go test -v ./tests
 
 format:
 	gofmt -s -w shared/*.go tests/*.go cmd/*/*.go
 
 
 clean:
-	rm -f data/hello data/helloworld data/hello.bc [td]*/.helloworld.c.o [td]*/.helloworld.c.o.bc
+	rm -f data/hello data/hello data/helloworld data/hello.bc [td]*/.helloworld.c.o [td]*/.helloworld.c.o.bc

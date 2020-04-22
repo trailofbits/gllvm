@@ -211,11 +211,13 @@ func buildObjectFile(compilerExecName string, pr parserResult, srcFile string, o
 		return
 	}
 
-	flagContents := jsonEncodeFlags(objFile, compilerExecName, args, pr)
-	err = SectionWrite(objFile, flagContents, SectionNameFlags)
-	if err != nil {
-		LogError("buildObjectFile(): Unable to write section")
-		return false
+	if LLVMEmbedFrontendArgs {
+		flagContents := jsonEncodeFlags(objFile, compilerExecName, args, pr)
+		err = SectionWrite(objFile, flagContents, SectionNameFlags)
+		if err != nil {
+			LogError("buildObjectFile(): Unable to write section")
+			return false
+		}
 	}
 
 	success = true

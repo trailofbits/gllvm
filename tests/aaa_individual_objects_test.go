@@ -13,9 +13,9 @@ import (
 
 func Test_individual_objects(t *testing.T) {
 	argss := [][]string{
-		{"-c", "../data/helloworld.c", "-o", "helloworld.o"},
-		{"-c", "../data/testobj.c", "-o", "testobj.o"},
-		{"helloworld.o", "testobj.o", "-o", "../data/helloworld"},
+		{"-c", "../data/helloworld.c", "-o", "helloworld2.o"},
+		{"-c", "../data/testobj.c", "-o", "testobj2.o"},
+		{"helloworld2.o", "testobj2.o", "-o", "../data/hello2"},
 	}
 
 	for _, args := range argss {
@@ -29,7 +29,7 @@ func Test_individual_objects(t *testing.T) {
 
 	}
 
-	args := []string{"get-bc", "-v", "../data/helloworld"}
+	args := []string{"get-bc", "-v", "../data/hello2"}
 
 	exitCode := shared.Extract(args)
 
