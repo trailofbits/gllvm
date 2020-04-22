@@ -34,12 +34,12 @@
 package shared
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 )
@@ -47,6 +47,14 @@ import (
 type bitcodeToObjectLink struct {
 	bcPath  string
 	objPath string
+}
+
+// BuildFlags is the container for info about command line arguments and build flags
+type BuildFlags struct {
+	Target           string
+	CompilerExecName string
+	Args             []string
+	ParserResult     parserResult
 }
 
 //Compile wraps a call to the compiler with the given args.
@@ -91,7 +99,7 @@ func Compile(args []string, compiler string) (exitCode int) {
 			// When objects and bitcode are built we can attach bitcode paths
 			// to object files and link
 			for _, link := range bcObjLinks {
-				attachBitcodePathToObject(link.bcPath, link.objPath)
+				attachBitcodePathToObject(link.bcPath, link.objPath, compilerExecName, pr, args)
 			}
 			if !pr.IsCompileOnly {
 				compileTimeLinkFiles(compilerExecName, pr, newObjectFiles)
@@ -130,81 +138,56 @@ func buildAndAttachBitcode(compilerExecName string, pr parserResult, bcObjLinks 
 	}
 }
 
-func attachBitcodePathToObject(bcFile, objFile string) (success bool) {
-	// We can only attach a bitcode path to certain file types
-	switch filepath.Ext(objFile) {
-	case
-		".o",
-		".lo",
-		".os",
-		".So",
-		".po":
-		// Store bitcode path to temp file
-		var absBcPath, _ = filepath.Abs(bcFile)
-		tmpContent := []byte(absBcPath + "\n")
-		tmpFile, err := ioutil.TempFile("", "gllvm")
+func jsonEncodeFlags(target string, compilerExecName string, args []string, pr parserResult) []byte {
+	flags := &BuildFlags{
+		Target:           target,
+		CompilerExecName: compilerExecName,
+		Args:             args,
+		ParserResult:     pr,
+	}
+
+	flagsBytes, err := json.Marshal(flags)
+	if err != nil {
+		LogError("jsonEncodeFlags(): Unable to JSON encode parserResults")
+		return []byte("ERROR")
+	}
+	flagsBytes = append(flagsBytes, 0xa)
+	return flagsBytes
+}
+
+func attachBitcodePathToObject(bcFile, objFile string, compilerExecName string, pr parserResult, args []string) (err error) {
+	var absBcPath, _ = filepath.Abs(bcFile)
+	bitcodeData := []byte(absBcPath + "\n")
+
+	SectionWrite(objFile, bitcodeData, SectionNameBitCode)
+
+	// Copy bitcode file to store, if necessary
+	if bcStorePath := LLVMBitcodeStorePath; bcStorePath != "" {
+		destFilePath := path.Join(bcStorePath, getHashedPath(absBcPath))
+		in, _ := os.Open(absBcPath)
+		defer CheckDefer(func() error { return in.Close() })
+		out, _ := os.Create(destFilePath)
+		defer CheckDefer(func() error { return out.Close() })
+		_, err := io.Copy(out, in)
 		if err != nil {
-			LogError("attachBitcodePathToObject: %v\n", err)
-			return
+			return fmt.Errorf("Copying bc to bitcode archive %v failed because %v", destFilePath, err)
 		}
-		defer CheckDefer(func() error { return os.Remove(tmpFile.Name()) })
-		if _, err := tmpFile.Write(tmpContent); err != nil {
-			LogError("attachBitcodePathToObject: %v\n", err)
-			return
-		}
-		if err := tmpFile.Close(); err != nil {
-			LogError("attachBitcodePathToObject: %v\n", err)
-			return
-		}
-
-		// Let's write the bitcode section
-		var attachCmd string
-		var attachCmdArgs []string
-		if runtime.GOOS == osDARWIN {
-			if len(LLVMLd) > 0 {
-				attachCmd = LLVMLd
-			} else {
-				attachCmd = "ld"
-			}
-			attachCmdArgs = []string{"-r", "-keep_private_externs", objFile, "-sectcreate", DarwinSegmentName, DarwinSectionName, tmpFile.Name(), "-o", objFile}
-		} else {
-			if len(LLVMObjcopy) > 0 {
-				attachCmd = LLVMObjcopy
-			} else {
-				attachCmd = "objcopy"
-			}
-			attachCmdArgs = []string{"--add-section", ELFSectionName + "=" + tmpFile.Name(), objFile}
-		}
-
-		// Run the attach command and ignore errors
-		_, nerr := execCmd(attachCmd, attachCmdArgs, "")
-		if nerr != nil {
-			LogWarning("attachBitcodePathToObject: %v %v failed because %v\n", attachCmd, attachCmdArgs, nerr)
-			return
-		}
-
-		// Copy bitcode file to store, if necessary
-		if bcStorePath := LLVMBitcodeStorePath; bcStorePath != "" {
-			destFilePath := path.Join(bcStorePath, getHashedPath(absBcPath))
-			in, _ := os.Open(absBcPath)
-			defer CheckDefer(func() error { return in.Close() })
-			out, _ := os.Create(destFilePath)
-			defer CheckDefer(func() error { return out.Close() })
-			_, err := io.Copy(out, in)
-			if err != nil {
-				LogWarning("Copying bc to bitcode archive %v failed because %v\n", destFilePath, err)
-				return
-			}
-			err = out.Sync()
-			if err != nil {
-				LogWarning("Syncing bitcode archive %v failed because %v\n", destFilePath, err)
-				return
-			}
-
+		err = out.Sync()
+		if err != nil {
+			return fmt.Errorf("Syncing bitcode archive %v failed because %v", destFilePath, err)
 		}
 	}
-	success = true
-	return
+
+	if LLVMEmbedFrontendArgs {
+		flagContents := jsonEncodeFlags(objFile, compilerExecName, args, pr)
+		err = SectionWrite(objFile, flagContents, SectionNameFlags)
+		if err != nil {
+			return fmt.Errorf("buildObjectFile(): Unable to write section")
+		}
+	}
+
+	return nil
+
 }
 
 func compileTimeLinkFiles(compilerExecName string, pr parserResult, objFiles []string) {
@@ -223,6 +206,7 @@ func compileTimeLinkFiles(compilerExecName string, pr parserResult, objFiles []s
 	} else {
 		LogInfo("LINKING: %v %v", compilerExecName, args)
 	}
+
 }
 
 // Tries to build the specified source file to object
@@ -234,6 +218,7 @@ func buildObjectFile(compilerExecName string, pr parserResult, srcFile string, o
 		LogError("Failed to build object file for %s because: %v\n", srcFile, err)
 		return
 	}
+
 	success = true
 	return
 }
@@ -249,6 +234,7 @@ func buildBitcodeFile(compilerExecName string, pr parserResult, srcFile string, 
 		LogError("Failed to build bitcode file for %s because: %v\n", srcFile, err)
 		return
 	}
+
 	success = true
 	return
 }
